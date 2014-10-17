@@ -32,7 +32,7 @@ Or, if you're feeling exceptionally fancy
 
 [proofread.py](proofread.py) is the Python script that does the proofreading
 
-[compile.py](compile.py) is a Python script to compile cleaned CSV files into both country-specific files as well as one big everything file
+[aggregate.py](aggregate.py) is a Python script to compile cleaned CSV files into both country-specific files as well as one big everything file. Read more in [../aggregate_data](../aggregate_data)
 
 [canonical_variables.csv](canonical_variables.csv) is a list of acceptable variable names (the content of the `description` or `variable` in a row)
 
