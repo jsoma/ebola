@@ -40,85 +40,65 @@ def levenshtein(s1, s2):
 
 # Tests for whitespace - should probably regex this for tabs etc
 def whitespace_test(items, descriptor):
+    error_free = True
     print "\n\033[1m## Testing %ss for whitespace\033[0m" % descriptor
 
     for idx, item in enumerate(items):
         if item != item.strip() or "\n" in item or "  " in item:
-            exit_code = 1
+            error_free = False
             print "line:%i: Whitespace found in %s '\033[30;43m%s\033[0m'" % \
                   (idx + 2, descriptor, item)
+
+    return error_free
 
 
 # Compares passed items vs. passed knowns, calling out anything not matching
 def unknowns_test(items, knowns, descriptor):
+    error_free = True
     print "\n\033[1m## Testing %ss for known values\033[0m" % descriptor
 
     unknowns_and_indexes = [(idx + 2, item) for idx, item in
                             enumerate(items) if item not in knowns]
 
     for unknown in unknowns_and_indexes:
-        exit_code = 1
+        error_free = False
         # Sort based on edit distance to suggest alternatives
         possibles = sorted(knowns,
                            key=lambda known: levenshtein(unknown[1], known))
         print "line:%i: Unknown %s '\033[30;43m%s\033[0m', maybe you meant '\033[30;42m%s\033[0m' or '\033[30;42m%s\033[0m'?" % \
             (unknown[0], descriptor, unknown[1], possibles[0], possibles[1])
 
-if len(sys.argv) < 2:
-    print "proofread [--autocorrect-whitespace] file.csv [file2.csv ...]"
-    exit(1)
+    return error_free
 
-# Keep this at 0 if it's successful, return 1 if there are errors
-exit_code = 0
 
-# Let's read in the canonical rows and columns
-with open('canonical_columns.csv', 'rU') as cols_file:
-    col_names = [row['name'] for row in csv.DictReader(cols_file)]
+def autocorrect_whitespace(filename):
+    tempfile = NamedTemporaryFile(delete=False)
 
-with open('canonical_variables.csv', 'rU') as vars_file:
-    var_names = [row['name'] for row in csv.DictReader(vars_file)]
+    with open(filename, 'rU') as csvFile, tempfile:
+        reader = csv.reader(csvFile)
+        writer = csv.writer(tempfile, lineterminator='\n')
 
-# In what column can we possibly find the variable (aka row) name?
-# Description = Guinea
-# Variable = Liberia
-# variable = Sierra Leone
-variable_col_names = ["Description", "Variable", "variable"]
+        for index, row in enumerate(reader):
+            # Remove newlines, duplicate spaces,
+            # and beginning/trailing whitespace
+            trimmed_row = [re.sub(r' +',
+                                  ' ',
+                                  cell.replace("\n", "").strip())
+                           for cell in row]
+            writer.writerow(trimmed_row)
 
-parser = argparse.ArgumentParser(description='Collect proofreading options')
+    shutil.move(tempfile.name, filename)
+    tempfile.close()
 
-# --autocorrect-whitespace will automatically trim whitespace in csv's
-parser.add_argument('--autocorrect-whitespace',
-                    dest='autocorrect_whitespace',
-                    action='store_true',
-                    default=False)
-parser.add_argument('filenames', nargs='*')  # This is it!!
 
-args = parser.parse_args()
+def proofread(filename):
+    # In what column can we possibly find the variable (aka row) name?
+    # Description = Guinea
+    # Variable = Liberia
+    # variable = Sierra Leone
+    variable_col_names = ["Description", "Variable", "variable"]
 
-# Grab the filename from passed arguments
-for filename in args.filenames:
-    print "\033[1mProcessing file: %s...\033[0m" % filename
-
-    # Remove any 'extra' whitespace in the to-be-processed file
-    if args.autocorrect_whitespace:
-        tempfile = NamedTemporaryFile(delete=False)
-
-        with open(filename, 'rU') as csvFile, tempfile:
-            reader = csv.reader(csvFile)
-            writer = csv.writer(tempfile, lineterminator='\n')
-
-            for index, row in enumerate(reader):
-                # Remove newlines, duplicate spaces,
-                # and beginning/trailing whitespace
-                trimmed_row = [re.sub(r' +',
-                                      ' ',
-                                      cell.replace("\n", "").strip())
-                               for cell in row]
-                writer.writerow(trimmed_row)
-
-        shutil.move(tempfile.name, filename)
-        tempfile.close()
-
+    error_free = True
     with open(filename, 'rU') as csvfile:
         reader = csv.DictReader(csvfile)
 
@@ -130,15 +110,46 @@ for filename in args.filenames:
         # Is the row variable called 'Description' or 'name' or what?
         # We do a set intersection and take the first match.
         matches = (set(variable_col_names) & set(headers))
-        
+
         if matches:
             col_name = matches.pop()
 
             variables = [row[col_name] for row in reader]
-            whitespace_test(variables, 'variable')
-            unknowns_test(variables, var_names, 'variable')
+            error_free = whitespace_test(variables, 'variable') and error_free
+            error_free = unknowns_test(variables, var_names, 'variable') \
+                and error_free
         else:
             print "Could not identify variable column name"
-            exit_code = 1
+            error_free = False
+    return error_free
 
-exit(exit_code)
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description='Collect proofread options')
+
+    # --autocorrect-whitespace will automatically trim whitespace in csv's
+    parser.add_argument('--autocorrect-whitespace',
+                        dest='autocorrect_whitespace',
+                        action='store_true',
+                        default=False)
+    parser.add_argument('filenames', nargs='*')  # This is it!!
+
+    args = parser.parse_args()
+
+    # Let's read in the canonical rows and columns
+    with open('canonical_columns.csv', 'rU') as cols_file:
+        col_names = [row['name'] for row in csv.DictReader(cols_file)]
+
+    with open('canonical_variables.csv', 'rU') as vars_file:
+        var_names = [row['name'] for row in csv.DictReader(vars_file)]
+
+    exit_code = 0
+    # Grab the filename from passed arguments
+    for filename in args.filenames:
+        print "\033[1mProcessing file: %s...\033[0m" % filename
+        if args.autocorrect_whitespace:
+            autocorrect_whitespace(filename)
+        # Will exit with 0 with no errors, 1 with errors
+        # proofread returns True (1) if no problems, so must negate it
+        exit_code = not proofread(filename) or exit_code
+
+    exit(exit_code)
